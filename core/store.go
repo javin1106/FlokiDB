@@ -1,6 +1,7 @@
 package core
 
 import (
+	"javinkv/config"
 	"time"
 )
 
@@ -30,6 +31,9 @@ func NewObj(value interface{}, durationMs int64) *Obj {
 }
 
 func Put(key string, obj *Obj) {
+	if len(store) >= config.KeysLimit {
+		evict()
+	}
 	store[key] = obj
 }
 

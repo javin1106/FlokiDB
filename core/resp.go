@@ -115,12 +115,12 @@ func Encode(value interface{}, isSimple bool) []byte {
 	case string:
 		if isSimple {
 			// Simple strings are replies like +PONG\r\n.
-			return []byte(fmt.Sprintf("+%s\r\n", v))
+			return fmt.Appendf(nil, "+%s\r\n", v)
 		}
 		// Bulk strings include the payload length before the actual value.
-		return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(v), v))
+		return fmt.Appendf(nil, "$%d\r\n%s\r\n", len(v), v)
 	case int, int8, int16, int32, int64:
-		return []byte(fmt.Sprintf(":%d\r\n", v))
+		return fmt.Appendf(nil, ":%d\r\n", v)
 	}
 	return []byte{}
 }
