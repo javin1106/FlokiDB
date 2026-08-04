@@ -11,31 +11,56 @@ import (
 	"strings"
 )
 
-func readCommand(c io.ReadWriter) (*core.RedisCmd, error) {
-	var buf []byte = make([]byte, 512)
+func toArrayString(values []interface{}) ([]string, error) {
+	tokens := make([]string, len(values))
+	for i, value := range values {
+		token, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected command token to be a string, got %T", value)
+		}
+		tokens[i] = token
+	}
+	return tokens, nil
+}
+
+func readCommands(c io.ReadWriter) (core.RedisCmds, error) {
+	buf := make([]byte, 512)
 	n, err := c.Read(buf[:])
 	if err != nil {
 		return nil, err
 	}
-	tokens, err := core.DecodeArrayString(buf[:n])
+
+	values, err := core.Decode(buf[:n])
 	if err != nil {
 		return nil, err
 	}
-	return &core.RedisCmd{
-		Cmd:  strings.ToUpper(tokens[0]),
-		Args: tokens[1:],
-	}, nil
-}
 
-func respondError(err error, c io.ReadWriter) {
-	fmt.Fprintf(c, "-%s\r\n", err)
-}
+	cmds := make(core.RedisCmds, 0, len(values))
+	for _, value := range values {
+		array, ok := value.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("expected command to be a RESP array, got %T", value)
+		}
 
-func respond(cmd *core.RedisCmd, c io.ReadWriter) {
-	err := core.EvalAndRespond(cmd, c)
-	if err != nil {
-		respondError(err, c)
+		tokens, err := toArrayString(array)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) == 0 {
+			return nil, fmt.Errorf("command array cannot be empty")
+		}
+
+		cmds = append(cmds, &core.RedisCmd{
+			Cmd:  strings.ToUpper(tokens[0]),
+			Args: tokens[1:],
+		})
 	}
+
+	return cmds, nil
+}
+
+func respond(cmds core.RedisCmds, c io.ReadWriter) {
+	core.EvalAndRespond(cmds, c)
 }
 
 func RunSyncTCPServer() {
@@ -55,6 +80,7 @@ func RunSyncTCPServer() {
 		c, err := lsnr.Accept()
 		if err != nil {
 			log.Println("err", err)
+			continue
 		}
 
 		// increment the number of concurrent clients
@@ -62,15 +88,16 @@ func RunSyncTCPServer() {
 
 		for {
 			// over the socket, continuously read the command and print it out
-			cmd, err := readCommand(c)
+			cmds, err := readCommands(c)
 			if err != nil {
 				c.Close()
 				con_clients -= 1
-				if err == io.EOF {
-					break
+				if err != io.EOF {
+					log.Println("err", err)
 				}
+				break
 			}
-			respond(cmd, c)
+			respond(cmds, c)
 		}
 	}
 }

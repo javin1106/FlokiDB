@@ -1,19 +1,24 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"io"
-	"log"
 	"strconv"
 	"time"
 )
 
 var RESP_NIL []byte = []byte("$-1\r\n")
+var RESP_OK []byte = []byte("+OK\r\n")
+var RESP_ZERO []byte = []byte(":0\r\n")
+var RESP_ONE []byte = []byte(":1\r\n")
+var RESP_MINUS_1 []byte = []byte(":-1\r\n")
+var RESP_MINUS_2 []byte = []byte(":-2\r\n")
 
-func evalPING(args []string, c io.ReadWriter) error {
+func evalPING(args []string) []byte {
 	var b []byte
 	if len(args) >= 2 {
-		return errors.New("ERR wrong number of arguments for 'ping' command")
+		return Encode(errors.New("ERR wrong number of arguments for 'ping' command"), false)
 	}
 
 	if len(args) == 0 {
@@ -24,14 +29,12 @@ func evalPING(args []string, c io.ReadWriter) error {
 		b = Encode(args[0], false)
 	}
 
-	// Write the encoded RESP reply back to the connected client.
-	_, err := c.Write(b)
-	return err
+	return b
 }
 
-func evalSET(args []string, c io.ReadWriter) error {
+func evalSET(args []string) []byte {
 	if len(args) <= 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'set' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'set' command"), false)
 	}
 
 	var key, value string
@@ -43,29 +46,28 @@ func evalSET(args []string, c io.ReadWriter) error {
 		case "EX", "ex":
 			i++
 			if i == len(args) {
-				return errors.New("(error) ERR syntax error")
+				return Encode(errors.New("(error) ERR syntax error"), false)
 			}
 			exDurationSec, err := strconv.ParseInt(args[i], 10, 64)
 			if err != nil {
-				return errors.New("(error) ERR value is not an integer or out of range")
+				return Encode(errors.New("(error) ERR value is not an integer or out of range"), false)
 			}
 			if exDurationSec <= 0 {
-				return errors.New("(error) ERR invalid expire time in 'set' command")
+				return Encode(errors.New("(error) ERR invalid expire time in 'set' command"), false)
 			}
 			exDurationMs = exDurationSec * 1000 // in Redis, time is by default in ms
 
 		default:
-			return errors.New("(error) ERR syntax error")
+			return Encode(errors.New("(error) ERR syntax error"), false)
 		}
 	}
 	Put(key, NewObj(value, exDurationMs))
-	c.Write([]byte("+OK\r\n"))
-	return nil
+	return RESP_OK
 }
 
-func evalGET(args []string, c io.ReadWriter) error {
+func evalGET(args []string) []byte {
 	if len(args) != 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'get' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'get' command"), false)
 	}
 
 	var key string = args[0]
@@ -75,25 +77,22 @@ func evalGET(args []string, c io.ReadWriter) error {
 
 	// if key does not exist, return RESP encoded nil
 	if obj == nil {
-		c.Write(RESP_NIL)
-		return nil
+		return RESP_NIL
 	}
 
 	// if key already expired then return nil
 	if obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
 		Del(key)
-		c.Write(RESP_NIL)
-		return nil
+		return RESP_NIL
 	}
 
 	// return the RESP encoded value
-	c.Write(Encode(obj.Value, false))
-	return nil
+	return Encode(obj.Value, false)
 }
 
-func evalTTL(args []string, c io.ReadWriter) error {
+func evalTTL(args []string) []byte {
 	if len(args) != 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'ttl' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'ttl' command"), false)
 	}
 
 	var key string = args[0]
@@ -102,8 +101,7 @@ func evalTTL(args []string, c io.ReadWriter) error {
 
 	// if key does not exist, return RESP encoded -2 denoting key does not exist
 	if obj == nil {
-		c.Write([]byte(":-2\r\n"))
-		return nil
+		return RESP_MINUS_2
 	}
 
 	durationMs := obj.ExpiresAt - time.Now().UnixMilli()
@@ -111,25 +109,22 @@ func evalTTL(args []string, c io.ReadWriter) error {
 	// if key expired i.e. key does not exist hence return -2
 	if durationMs < 0 {
 		Del(key)
-		c.Write([]byte(":-2\r\n"))
-		return nil
+		return RESP_MINUS_2
 	}
 
 	// if object exist, but no expiration is set on it then send -1
 	if obj.ExpiresAt == -1 {
-		c.Write([]byte(":-1\r\n"))
-		return nil
+		return RESP_MINUS_1
 	}
 
 	// compute the time remaining for the key to expire and
 	// return the RESP encoded form of it
-	c.Write(Encode(int64(durationMs/1000), false))
-	return nil
+	return Encode(int64(durationMs/1000), false)
 }
 
-func evalDEL(args []string, c io.ReadWriter) error {
+func evalDEL(args []string) []byte {
 	if len(args) == 0 {
-		return errors.New("(error)ERR wrong number of arguments for 'del' command")
+		return Encode(errors.New("(error)ERR wrong number of arguments for 'del' command"), false)
 	}
 	var countDeleted int = 0
 	for _, key := range args {
@@ -142,57 +137,58 @@ func evalDEL(args []string, c io.ReadWriter) error {
 			countDeleted++
 		}
 	}
-	c.Write(Encode(countDeleted, false))
-	return nil
+	return Encode(countDeleted, false)
 }
 
-func evalEXPIRE(args []string, c io.ReadWriter) error {
+func evalEXPIRE(args []string) []byte {
 	if len(args) != 2 {
-		return errors.New("(error)ERR wrong number of arguments for 'expire' command")
+		return Encode(errors.New("(error)ERR wrong number of arguments for 'expire' command"), false)
 	}
 	var key string = args[0]
 	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
-		return errors.New("(error) ERR value is not an integer or out of range")
+		return Encode(errors.New("(error) ERR value is not an integer or out of range"), false)
 	}
 	if exDurationSec <= 0 {
-		return errors.New("(error) ERR invalid expire time in 'expire' command")
+		return Encode(errors.New("(error) ERR invalid expire time in 'expire' command"), false)
 	}
 	obj := Get(key)
 
 	// unsuccessful -> doesn't exits, timeout not set
 	if obj == nil {
-		c.Write([]byte(":0\r\n"))
-		return nil
+		return RESP_NIL
 	}
 	if obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
 		Del(key)
-		c.Write([]byte(":0\r\n"))
-		return nil
+		return RESP_NIL
 	}
 
 	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
-	c.Write([]byte(":1\r\n"))
-	return nil
+	return RESP_ONE
 }
 
-func EvalAndRespond(cmd *RedisCmd, c io.ReadWriter) error {
-	log.Println("command", cmd.Cmd)
-	// Dispatch the parsed command to the matching handler.
-	switch cmd.Cmd {
-	case "PING":
-		return evalPING(cmd.Args, c)
-	case "SET":
-		return evalSET(cmd.Args, c)
-	case "GET":
-		return evalGET(cmd.Args, c)
-	case "TTL":
-		return evalTTL(cmd.Args, c)
-	case "DEL":
-		return evalDEL(cmd.Args, c)
-	case "EXPIRE":
-		return evalEXPIRE(cmd.Args, c)
-	default:
-		return errors.New("(error) ERR unknown command")
+func EvalAndRespond(cmds RedisCmds, c io.ReadWriter) {
+	var response []byte
+	buf := bytes.NewBuffer(response)
+
+	for _, cmd := range cmds {
+		switch cmd.Cmd {
+		case "PING":
+			buf.Write(evalPING(cmd.Args))
+		case "SET":
+			buf.Write(evalSET(cmd.Args))
+		case "GET":
+			buf.Write(evalGET(cmd.Args))
+		case "TTL":
+			buf.Write(evalTTL(cmd.Args))
+		case "DEL":
+			buf.Write(evalDEL(cmd.Args))
+		case "EXPIRE":
+			buf.Write(evalEXPIRE(cmd.Args))
+		default:
+			buf.Write(evalPING(cmd.Args))
+		}
 	}
+
+	c.Write(buf.Bytes())
 }
