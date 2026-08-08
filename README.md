@@ -1,4 +1,4 @@
-# JavinKV
+# FlokiDB
 
 A Redis-compatible, in-memory key-value server written in Go using TCP sockets,
 RESP, and Linux `epoll`.
@@ -63,5 +63,5 @@ EPOLLIN -> input buffer -> RESP decoder -> command evaluation
 EPOLLOUT <- socket write <- output buffer <- ordered responses
 ```
 
-This work should be completed before describing JavinKV's pipelining as fully
+This work should be completed before describing FlokiDB's pipelining as fully
 TCP-stream-safe.
