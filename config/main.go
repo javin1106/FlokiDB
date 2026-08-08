@@ -5,3 +5,4 @@ var Port int = 7379
 var KeysLimit int = 10000
 
 var EvictionStrategy string = "simple-first"
+var AOFFile string = "./floki-db.aof"

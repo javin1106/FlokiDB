@@ -158,6 +158,10 @@ func Decode(data []byte) ([]interface{}, error) {
 	return values, nil
 }
 
+func encodeString(v string) []byte {
+	return fmt.Appendf(nil, "$%d\r\n%s\r\n", len(v), v)
+}
+
 func Encode(value interface{}, isSimple bool) []byte {
 	switch v := value.(type) {
 	case string:
@@ -166,9 +170,17 @@ func Encode(value interface{}, isSimple bool) []byte {
 			return fmt.Appendf(nil, "+%s\r\n", v)
 		}
 		// Bulk strings include the payload length before the actual value.
-		return fmt.Appendf(nil, "$%d\r\n%s\r\n", len(v), v)
+		return encodeString(v)
 	case int, int8, int16, int32, int64:
 		return fmt.Appendf(nil, ":%d\r\n", v)
+	case []string:
+		var b []byte
+		buf := bytes.NewBuffer(b)
+		for _, token := range v {
+			buf.Write(encodeString(token))
+		}
+
+		return fmt.Appendf(nil, "*%d\r\n%s", len(v), buf.Bytes())
 	case error:
 		return fmt.Appendf(nil, "-%s\r\n", v.Error())
 	case nil:
