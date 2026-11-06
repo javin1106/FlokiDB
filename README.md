@@ -3,6 +3,30 @@
 A Redis-compatible, in-memory key-value server written in Go using TCP sockets,
 RESP, and Linux `epoll`.
 
+## Benchmarks
+
+Tool: `redis-benchmark` (from `redis-tools`), run in WSL2 (Ubuntu) against
+FlokiDB built and running in the same WSL instance, port 7379.
+
+| Command | Result | Notes |
+|---|---|---|
+| `redis-benchmark -p 7379 -t set,get -n 100000 -c 50 -q` | GET: ~152,439 req/s, p50 = 0.167 ms | 100k requests, 50 clients, no pipelining. SET (run separately): ~156,495 req/s, p50 = 0.159 ms. |
+| `redis-benchmark -p 7379 -t set,get -n 200000 -c 50 -P 16 -q` | Failed: `Connection reset by peer` | Pipelining. The server closes the connection when a read ends mid-command. See "Deferred: Stream-safe command pipelining" below. |
+
+Baseline: real Redis 8.0.5 (`redis-server --port 6380 --save ""`, no persistence),
+same machine and same benchmark command (`-t set,get -n 100000 -c 50 -q`):
+
+| Server | SET (req/s) | GET (req/s) | p50 |
+|---|---|---|---|
+| Redis 8.0.5 | 165,289 | 160,256 | 0.151 ms |
+| FlokiDB | 156,495 | 152,439 | 0.159 ms (SET), 0.167 ms (GET) |
+
+FlokiDB reaches about 95% of Redis throughput on SET and GET in this test. Note that
+Redis ran with persistence off, while FlokiDB writes an AOF.
+
+`WARNING: Could not fetch server CONFIG` appears because `CONFIG GET` is not
+implemented. It is harmless.
+
 ## Deferred: Stream-safe command pipelining
 
 The current pipelining implementation can decode and execute multiple complete
