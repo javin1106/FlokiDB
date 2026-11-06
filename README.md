@@ -24,6 +24,27 @@ same machine and same benchmark command (`-t set,get -n 100000 -c 50 -q`):
 FlokiDB reaches about 95% of Redis throughput on SET and GET in this test. Note that
 Redis ran with persistence off, while FlokiDB writes an AOF.
 
+### Concurrency stress test
+
+`redis-benchmark -p 7379 -t set,get -n 200000 -c <clients> -q`, with
+`ulimit -n 65536` for both server and client, same WSL2 instance (loopback).
+
+| Clients | SET (req/s) | GET (req/s) | p50 SET / GET | Server survived |
+|---|---|---|---|---|
+| 50 | 152,555 | 150,602 | 0.167 / 0.167 ms | yes |
+| 500 | 135,593 | 134,862 | 1.807 / 1.783 ms | yes |
+| 1,000 | 122,474 | 110,988 | 4.087 / 4.351 ms | yes |
+| 2,000 | 97,943 | 91,575 | 9.671 / 10.479 ms | yes |
+| 5,000 | 75,131 | 71,149 | 32.831 / 34.463 ms | yes |
+| 10,000 | 92,039 | 102,881 | 53.791 / 47.167 ms | yes |
+| 15,000 | 102,669 | 110,497 | 48.767 / 46.527 ms | yes |
+
+FlokiDB served 15,000 concurrent connections without errors or crashes,
+sustaining ~100K req/s. Latency rises with client count, as expected for a
+single-threaded event loop. Runs beyond 15,000 clients were not completed.
+The benchmark client shares the same machine, so it competes for CPU at high
+client counts.
+
 `WARNING: Could not fetch server CONFIG` appears because `CONFIG GET` is not
 implemented. It is harmless.
 
